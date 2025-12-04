@@ -40,6 +40,7 @@ const char* pf_topic      = "esp32/powerFactor";
 #define PZEM_DEFAULT_ADDR 0x01
 #define RX_PIN 16
 #define TX_PIN 17
+#define RELAY_PIN 15
 
 HardwareSerial espSerial(2); // RX, TX
 PZEM004Tv30 pzem(&espSerial, RX_PIN, TX_PIN, PZEM_DEFAULT_ADDR);
@@ -197,6 +198,16 @@ void MQTTTask(void *pvParameters) {
   }
 }
 
+void relayTask() {
+  pinMode(RELAY_PIN, OUTPUT);
+  while (true) {
+    digitalWrite(RELAY_PIN, HIGH); // Turn relay ON
+    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
+    digitalWrite(RELAY_PIN, LOW); // Turn relay OFF
+    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
+  }
+
+}
 
 void setup() {
   Serial.begin(115200);
@@ -225,6 +236,17 @@ void setup() {
        NULL,                // Task handle
        1                    // Core where the task should run
    );
+
+  // Create the relayTask pinned to core 1
+  xTaskCreatePinnedToCore(
+      (TaskFunction_t)relayTask, // Task function
+      "RelayTask",               // Name of the task
+      2048,                      // Stack size in words
+      NULL,                      // Task input parameter
+      2,                         // Priority of the task
+      NULL,                      // Task handle
+      1                          // Core where the task should run
+  );
 
 }
 
