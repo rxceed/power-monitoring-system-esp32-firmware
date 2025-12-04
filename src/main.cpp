@@ -243,7 +243,7 @@ void setup() {
       "RelayTask",               // Name of the task
       2048,                      // Stack size in words
       NULL,                      // Task input parameter
-      2,                         // Priority of the task
+      1,                         // Priority of the task
       NULL,                      // Task handle
       1                          // Core where the task should run
   );
