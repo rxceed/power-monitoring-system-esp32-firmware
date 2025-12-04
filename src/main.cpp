@@ -144,7 +144,7 @@ void ReadPZEMTask(void *pvParameters) {
 
     Serial.printf("%.2f V; %.2f A; %.2f W; %.2f Wh; %.2f Hz; %.2f\n", 
       params->voltage, params->current, params->power, params->energy, params->frequency, params->pf );
-    vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds
+    vTaskDelay(pdMS_TO_TICKS(200)); // Delay for 2 seconds
   }
 }
 
@@ -193,7 +193,7 @@ void MQTTTask(void *pvParameters) {
     dtostrf(params->pf, 1, 2, pfStr);
     client.publish(pf_topic, pfStr);
 
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 

@@ -1,6 +1,6 @@
 #ifndef SECRET_H
 #define SECRE_H
-#define WIFI_SSID "RXHSPT"
-#define WIFI_PASSWORD "yayayasayasetuju"
-#define MQTT_BROKER "10.101.253.90"
+#define WIFI_SSID "b401_wifi"
+#define WIFI_PASSWORD "b401juara1"
+#define MQTT_BROKER "192.168.200.120"
 #endif
