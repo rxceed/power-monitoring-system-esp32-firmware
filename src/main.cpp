@@ -273,6 +273,7 @@ void checkFirmwareUpdate(void *pvParameters) {
     } else {
       Serial.println("Device is up to date.");
     }
+    vTaskDelay(pdMS_TO_TICKS(1000*180));
   }
 }
 
