@@ -21,7 +21,7 @@ const char* password = WIFI_PASSWORD;
 const char* VERSION_URL = "https://raw.githubusercontent.com/rxceed/power-monitoring-system-esp32-firmware/refs/heads/main/version.txt";
 const char* FIRMWARE_BASE_URL = "https://github.com/rxceed/power-monitoring-system-esp32-firmware/releases/download/v";
 
-const int FIRMWARE_VERSION = 1;
+const int FIRMWARE_VERSION = 0;
 
 // MQTT Broker
 const char* mqtt_server = MQTT_BROKER;
@@ -217,6 +217,42 @@ void relayTask(void *pvParameters) {
 
 }
 
+// Helper function to resolve GitHub redirects manually
+String getFinalURL(String url) {
+  HTTPClient http;
+  WiFiClientSecure client;
+  client.setInsecure(); // We only need to grab the header, security is less critical here
+
+  // We need to stop the internal library from following the redirect automatically
+  // so we can grab the new URL cleanly.
+  http.begin(client, url);
+  
+  // We want to read the "Location" header which contains the new URL
+  const char *headerKeys[] = {"Location"};
+  http.collectHeaders(headerKeys, 1);
+
+  int httpCode = http.GET();
+  String newUrl = "";
+
+  // Check for Redirect (301 or 302)
+  if (httpCode == HTTP_CODE_MOVED_PERMANENTLY || httpCode == HTTP_CODE_FOUND) {
+    newUrl = http.header("Location");
+    Serial.println("Redirect detected!");
+    Serial.println("Original: " + url);
+    Serial.println("New:      " + newUrl);
+  } 
+  else if (httpCode == HTTP_CODE_OK) {
+    // If GitHub somehow gave us the file directly (rare)
+    newUrl = url; 
+  } 
+  else {
+    Serial.printf("Error resolving URL. HTTP Code: %d\n", httpCode);
+  }
+  
+  http.end();
+  return newUrl;
+}
+
 void checkFirmwareUpdate(void *pvParameters) {
   Serial.println("Checking for firmware updates...");
 
@@ -254,10 +290,14 @@ void checkFirmwareUpdate(void *pvParameters) {
       Serial.println("New firmware detected! Starting update...");
       
       String firmwareUrl = FIRMWARE_BASE_URL + String(newVersion) + "/firmware.bin";
-      
-      Serial.println("Target URL: " + firmwareUrl);
-
-      t_httpUpdate_return ret = httpUpdate.update(client, firmwareUrl);
+      String finalUrl = getFinalURL(firmwareUrl);
+    
+      if (finalUrl == "") {
+        Serial.println("Could not get the final URL. Aborting.");
+        return;
+      }
+      Serial.println("Target URL: " + finalUrl);
+      t_httpUpdate_return ret = httpUpdate.update(client, finalUrl);
 
       switch (ret) {
         case HTTP_UPDATE_FAILED:
@@ -273,7 +313,6 @@ void checkFirmwareUpdate(void *pvParameters) {
     } else {
       Serial.println("Device is up to date.");
     }
-    vTaskDelay(pdMS_TO_TICKS(1000*180));
   }
 }
 
