@@ -7,6 +7,9 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <time.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include "secret.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
@@ -14,6 +17,11 @@
 // SSID and PASS
 const char* ssid     = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
+
+const char* VERSION_URL = "https://raw.githubusercontent.com/rxceed/power-monitoring-system-esp32-firmware/refs/heads/main/version.txt";
+const char* FIRMWARE_BASE_URL = "https://github.com/rxceed/power-monitoring-system-esp32-firmware/releases/download/v";
+
+const int FIRMWARE_VERSION = 0;
 
 // MQTT Broker
 const char* mqtt_server = MQTT_BROKER;
@@ -198,7 +206,7 @@ void MQTTTask(void *pvParameters) {
   }
 }
 
-void relayTask() {
+void relayTask(void *pvParameters) {
   pinMode(RELAY_PIN, OUTPUT);
   while (true) {
     digitalWrite(RELAY_PIN, HIGH); // Turn relay ON
@@ -207,6 +215,65 @@ void relayTask() {
     vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
   }
 
+}
+
+void checkFirmwareUpdate(void *pvParameters) {
+  Serial.println("Checking for firmware updates...");
+
+  WiFiClientSecure client;
+  client.setInsecure(); // Use setCACert(root_ca) for production
+
+  HTTPClient http;
+  
+  while(1)
+  {
+    // 1. GET THE VERSION TEXT FILE
+    if (!http.begin(client, VERSION_URL)) {
+      Serial.println("Cannot connect to version file URL");
+      return;
+    }
+
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+      Serial.printf("Version check failed, HTTP Code: %d\n", httpCode);
+      http.end();
+      return;
+    }
+
+    // 2. READ AND PARSE VERSION
+    String payload = http.getString();
+    http.end();
+
+    payload.trim(); 
+    int newVersion = payload.toInt();
+
+    Serial.printf("Current Version: %d, Server Version: %d\n", FIRMWARE_VERSION, newVersion);
+
+    // 3. COMPARE AND UPDATE
+    if (newVersion > FIRMWARE_VERSION) {
+      Serial.println("New firmware detected! Starting update...");
+      
+      String firmwareUrl = FIRMWARE_BASE_URL + String(newVersion) + "/firmware.bin";
+      
+      Serial.println("Target URL: " + firmwareUrl);
+
+      t_httpUpdate_return ret = httpUpdate.update(client, firmwareUrl);
+
+      switch (ret) {
+        case HTTP_UPDATE_FAILED:
+          Serial.printf("Update Failed. Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+          break;
+        case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("No updates.");
+          break;
+        case HTTP_UPDATE_OK:
+          Serial.println("Update OK."); // System will restart automatically
+          break;
+      }
+    } else {
+      Serial.println("Device is up to date.");
+    }
+  }
 }
 
 void setup() {
@@ -234,18 +301,28 @@ void setup() {
        &PZEMParams,                // Task input parameter
        1,                   // Priority of the task
        NULL,                // Task handle
-       1                    // Core where the task should run
+       0                    // Core where the task should run
    );
 
   // Create the relayTask pinned to core 1
   xTaskCreatePinnedToCore(
-      (TaskFunction_t)relayTask, // Task function
+      relayTask, // Task function
       "RelayTask",               // Name of the task
       2048,                      // Stack size in words
       NULL,                      // Task input parameter
       1,                         // Priority of the task
       NULL,                      // Task handle
       1                          // Core where the task should run
+  );
+
+  xTaskCreatePinnedToCore(
+    checkFirmwareUpdate,
+    "Firmware Update Task",
+    16384,
+    NULL,
+    10,
+    NULL,
+    0
   );
 
 }

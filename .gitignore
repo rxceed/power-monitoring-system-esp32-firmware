@@ -2,7 +2,5 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-.pio/libdeps
-.pio/build/project.checksum
-.pio/build/esp32doit-devkit-v1/*
-!.pio/build/esp32doit-devkit-v1/firmware.bin
+.pio
+include/secret.h
