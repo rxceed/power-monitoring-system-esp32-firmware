@@ -21,7 +21,7 @@ const char* password = WIFI_PASSWORD;
 const char* VERSION_URL = "https://raw.githubusercontent.com/rxceed/power-monitoring-system-esp32-firmware/refs/heads/main/version.txt";
 const char* FIRMWARE_BASE_URL = "https://github.com/rxceed/power-monitoring-system-esp32-firmware/releases/download/v";
 
-const int FIRMWARE_VERSION = 1;
+const int FIRMWARE_VERSION = 2;
 
 // MQTT Broker
 const char* mqtt_server = MQTT_BROKER;
@@ -313,7 +313,7 @@ void checkFirmwareUpdate(void *pvParameters) {
     } else {
       Serial.println("Device is up to date.");
     }
-    vTaskDelay(pdMS_TO_TICKS(1000*180));
+    vTaskDelay(pdMS_TO_TICKS(1000*60*60));
   }
 }
 
