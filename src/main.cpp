@@ -48,7 +48,7 @@ const char* pf_topic      = "esp32/powerFactor";
 #define PZEM_DEFAULT_ADDR 0x01
 #define RX_PIN 16
 #define TX_PIN 17
-#define RELAY_PIN 15
+#define RELAY_PIN 13
 
 HardwareSerial espSerial(2); // RX, TX
 PZEM004Tv30 pzem(&espSerial, RX_PIN, TX_PIN, PZEM_DEFAULT_ADDR);
@@ -63,6 +63,13 @@ typedef struct
   float pf;
 } PZEM_task_params;
 
+typedef struct 
+{
+  float catboost;
+  float rnn;
+} classification_confidence;
+
+
 //PZEM args
 PZEM_task_params PZEMParams{
   .voltage = 0,
@@ -72,6 +79,13 @@ PZEM_task_params PZEMParams{
   .frequency = 0,
   .pf = 0,
 };
+
+classification_confidence confidence{
+  .catboost = 1,
+  .rnn = 1
+};
+
+static char relayControl = 0;
 
 SemaphoreHandle_t pzemMutex;
 
@@ -83,15 +97,29 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (unsigned int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+  String message;
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
   }
-  Serial.println();
+  Serial.print(message);
+  Serial.printf("\n");
+  if(!strcmp(topic, "inference/confidence_catboost"))
+  {
+    confidence.catboost = message.toFloat();
+  }
+  else if(!strcmp(topic, "inference/confidence_rnn"))
+  {
+    confidence.rnn = message.toFloat();
+  }
+  else if(!strcmp(topic, "esp32/relay/control"))
+  {
+    relayControl = 1;
+  }
 }
 
 // Wifi connection function
-void setup_wifi() {
-  delay(1000);
+void setup_wifi(void *pvParameters) {
+  vTaskDelay(pdMS_TO_TICKS(100));
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
@@ -99,16 +127,22 @@ void setup_wifi() {
   WiFi.mode(WIFI_MODE_STA);
 
   WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  WiFi.setAutoReconnect(true);
+  while(1)
+  {
+    if(WiFi.status() != WL_CONNECTED) 
+    {
+      Serial.print(".");
+      if(WiFi.status() == WL_CONNECTED)
+      {
+        Serial.println("");
+        Serial.println("WiFi connected");
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
 }
 
 // MQTT reconnect function
@@ -122,21 +156,18 @@ void reconnect() {
     // Attempt to connect
     if (client.connect(clientId.c_str())) {
       Serial.println("connected");
+      client.subscribe("inference/confidence_catboost");
+      client.subscribe("inference/confidence_rnn");
       // Once connected, publish an announcement...
       client.publish("esp32/status", "NYAMBUNG CAK!");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
+      Serial.println(" try again in 0.5 seconds");
       // Wait 5 seconds before retrying
-      delay(5000);
+      vTaskDelay(pdMS_TO_TICKS(500));
     }
   }
-}
-
-void subscribeTopics() {
-  client.setCallback(callback);
-  client.subscribe("niggasLair/status");
 }
 
 // Task function to read PZEM data
@@ -145,10 +176,15 @@ void ReadPZEMTask(void *pvParameters) {
   while(1)
   {
     params->voltage = pzem.voltage();
+    vTaskDelay(10);
     params->current = pzem.current();
+    vTaskDelay(10);
     params->power = pzem.power();
+    vTaskDelay(10);
     params->energy = pzem.energy();
+    vTaskDelay(10);
     params->frequency = pzem.frequency();
+    vTaskDelay(10);
     params->pf = pzem.pf();
 
     Serial.printf("%.2f V; %.2f A; %.2f W; %.2f Wh; %.2f Hz; %.2f\n", 
@@ -159,10 +195,18 @@ void ReadPZEMTask(void *pvParameters) {
 
 // Task function to handle MQTT communication
 void MQTTTask(void *pvParameters) {
+  while(WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("MQTT: Waiting for wifi to connect...");
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
   client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+  client.setKeepAlive(5);
   PZEM_task_params *params = (PZEM_task_params*) pvParameters;
   while(1) 
   {
+    printf("MQTT STATUS: %d\n", client.connected());
     if (!client.connected()) {
       reconnect();
     }
@@ -172,49 +216,67 @@ void MQTTTask(void *pvParameters) {
     dtostrf(params->voltage, 1, 2, voltageStr);
     client.publish(voltage_topic, voltageStr);
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(10);
 
     char currentStr[16];
     dtostrf(params->current, 1, 2, currentStr);
     client.publish(current_topic, currentStr);
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(10);
 
     char powerStr[16];
     dtostrf(params->power, 1, 2, powerStr);
     client.publish(power_topic, powerStr);
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(10);
 
     char energyStr[16];
     dtostrf(params->energy, 1, 2, energyStr);
     client.publish(energy_topic, energyStr);
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(10);
 
     char frequencyStr[16];
     dtostrf(params->frequency, 1, 2, frequencyStr);
     client.publish(frequency_topic, frequencyStr);
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(10);
 
     char pfStr[16];
     dtostrf(params->pf, 1, 2, pfStr);
     client.publish(pf_topic, pfStr);
-
+    printf("Published all!\n");
     vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 
 void relayTask(void *pvParameters) {
-  pinMode(RELAY_PIN, OUTPUT);
   while (true) {
-    digitalWrite(RELAY_PIN, HIGH); // Turn relay ON
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
-    digitalWrite(RELAY_PIN, LOW); // Turn relay OFF
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for 5 seconds
+    if(relayControl == 0)
+    {
+      if(confidence.catboost < 0.4 && confidence.rnn < 0.6)
+      {
+        digitalWrite(RELAY_PIN, 0);
+        printf("Unknown Device Detected!\n");
+      }
+      else if(confidence.catboost < 0.3)
+      {
+        digitalWrite(RELAY_PIN, 0);
+        printf("Unknown Device Detected!\n");
+      }
+      else if(confidence.rnn < 0.5)
+      {
+        digitalWrite(RELAY_PIN, 0);
+        printf("Unknown Device Detected!\n");
+      }
+    }
+    else if(relayControl == 1)
+    {
+      digitalWrite(RELAY_PIN, 1);
+      relayControl = 0;
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
-
 }
 
 // Helper function to resolve GitHub redirects manually
@@ -254,6 +316,11 @@ String getFinalURL(String url) {
 }
 
 void checkFirmwareUpdate(void *pvParameters) {
+  while(WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("OTA: Waiting for wifi to connect...");
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
   Serial.println("Checking for firmware updates...");
 
   WiFiClientSecure client;
@@ -319,10 +386,18 @@ void checkFirmwareUpdate(void *pvParameters) {
 
 void setup() {
   Serial.begin(115200);
-  setup_wifi();
-
   espSerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
-
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, 1);
+  xTaskCreatePinnedToCore(
+    setup_wifi,
+    "Setup wifi task",
+    8192,
+    NULL,
+    3,
+    NULL,
+    0
+  );
   // Create the ReadPZEMTask pinned to core 1
   xTaskCreatePinnedToCore(
       ReadPZEMTask,          // Task function
@@ -330,7 +405,7 @@ void setup() {
       4096,                 // Stack size in words
       &PZEMParams,                 // Task input parameter
       1,                    // Priority of the task
-      &ReadPZEMTaskHandle,  // Task handle
+      NULL,  // Task handle
       1                     // Core where the task should run
   );
   
@@ -340,9 +415,9 @@ void setup() {
        "MQTTTask",          // Name of the task
        8192,                // Stack size in words
        &PZEMParams,                // Task input parameter
-       1,                   // Priority of the task
+       2,                   // Priority of the task
        NULL,                // Task handle
-       0                    // Core where the task should run
+       1                    // Core where the task should run
    );
 
   // Create the relayTask pinned to core 1
@@ -361,7 +436,7 @@ void setup() {
     "Firmware Update Task",
     16384,
     NULL,
-    10,
+    2,
     NULL,
     0
   );
