@@ -21,7 +21,7 @@ const char* password = WIFI_PASSWORD;
 const char* VERSION_URL = "https://raw.githubusercontent.com/rxceed/power-monitoring-system-esp32-firmware/refs/heads/main/version.txt";
 const char* FIRMWARE_BASE_URL = "https://github.com/rxceed/power-monitoring-system-esp32-firmware/releases/download/v";
 
-const int FIRMWARE_VERSION = 2;
+const int FIRMWARE_VERSION = 3;
 
 // MQTT Broker
 const char* mqtt_server = MQTT_BROKER;
@@ -158,6 +158,7 @@ void reconnect() {
       Serial.println("connected");
       client.subscribe("inference/confidence_catboost");
       client.subscribe("inference/confidence_rnn");
+      client.subscribe("esp32/relay/control");
       // Once connected, publish an announcement...
       client.publish("esp32/status", "NYAMBUNG CAK!");
     } else {
@@ -251,29 +252,50 @@ void MQTTTask(void *pvParameters) {
 }
 
 void relayTask(void *pvParameters) {
+  long long timer = millis();
+  long long timerUnknownDevice = 0;
   while (true) {
     if(relayControl == 0)
     {
-      if(confidence.catboost < 0.4 && confidence.rnn < 0.6)
+      if(confidence.catboost < 0.4 && confidence.rnn < 0.5)
       {
-        digitalWrite(RELAY_PIN, 0);
-        printf("Unknown Device Detected!\n");
+        if(timerUnknownDevice >= 5000)
+        {
+          digitalWrite(RELAY_PIN, 0);
+          printf("Unknown Device Detected!\n");
+        }
+        timerUnknownDevice = millis() - timer;
       }
       else if(confidence.catboost < 0.3)
       {
-        digitalWrite(RELAY_PIN, 0);
-        printf("Unknown Device Detected!\n");
+        if(timerUnknownDevice >= 5000)
+        {
+          digitalWrite(RELAY_PIN, 0);
+          printf("Unknown Device Detected!\n");
+        }
+        timerUnknownDevice = millis() - timer;
       }
-      else if(confidence.rnn < 0.5)
+      else if(confidence.rnn < 0.4)
       {
-        digitalWrite(RELAY_PIN, 0);
-        printf("Unknown Device Detected!\n");
+        if(timerUnknownDevice >= 5000)
+        {
+          digitalWrite(RELAY_PIN, 0);
+          printf("Unknown Device Detected!\n");
+        }
+        timerUnknownDevice = millis() - timer;
+      }
+      else if(confidence.catboost >= 0.4 && confidence.rnn >= 0.5)
+      {
+        timerUnknownDevice = 0;
+        timer = millis();
       }
     }
     else if(relayControl == 1)
     {
       digitalWrite(RELAY_PIN, 1);
       relayControl = 0;
+      timer = millis();
+      timerUnknownDevice = 0;
     }
     vTaskDelay(pdMS_TO_TICKS(200));
   }
